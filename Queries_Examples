@@ -1,0 +1,410 @@
+
+
+-------------------------------------------------------------------------------------------------------
+-----------------------------Hospoda Problem----------------------------------------------------------
+-------------------------------------------------------------------------------------------------------
+
+
+--		Creative fun task: Let us pressume we have two tables holding two kinds of input:
+--		1) The Pub Table, giving us data on poub ownership and empty beer flasks.
+--		2) Beer Box Table, giving info on boxes for empty flasks on stock.
+--		The goal is to create table giving info on which box has been filled with how many bottles and where
+--		Such as, Pub 'U Zvířátka' with ID 1 has 37 empty beer flasks,
+--		the flasks have been divided along  'P-001'(20), 'P-001'(17) beer boxes.
+--
+--
+--		The "trick" was to use Standard SQL:2011 for this task and nothing esle.
+--
+--		Here I present two different options: Cross Join Method (and some minor computation) and Recursive CTE approach
+--	
+--		
+
+
+
+------------------------- Declaring input tables and inserting data: ------------------------- 
+
+
+
+---------------- Start ---------------- 
+
+DECLARE @Beer_Sale TABLE(
+	 ID						 INT PRIMARY KEY
+	,Pub_Name				 VARCHAR(30)
+	,Beer_Sold				 INT);
+
+INSERT INTO @Beer_Sale VALUES
+	 (1, 'U Zvířátka', 37)
+	,(2, 'U Hovada', 15)
+	,(3, 'U Divé Svině', 43);
+
+
+DECLARE @Box_Stock TABLE(
+     ID						 INT PRIMARY KEY
+	,Box_Stock_Name			 VARCHAR(30)
+	,Capacity				 INT);
+
+
+INSERT INTO @Box_Stock VALUES
+	 (1,'P-001',20)
+	,(2,'P-002',20)
+	,(3,'P-003',20)
+	,(4,'P-004',20)
+	,(5,'P-005',20)
+	,(6,'P-006',20)
+	,(7,'P-007',20)
+	,(8,'P-008',20)
+	,(9,'P-009',20)
+	,(10,'P-010',20); 
+
+
+
+
+
+---------------- End ---------------- 
+
+
+
+
+---------------- Declaring auxuliary table that holds all I need for result Logistic_Report table : ---------------- 
+
+
+DECLARE @Auxiliary_Table TABLE(
+	 Pub_ID_Helper			INT PRIMARY KEY
+	,Box_Rank				INT
+	,Pub_ID					INT
+	,Pub_Name				VARCHAR(30)
+	,Pub_Beer_Sold			INT
+	,Pub_Beer_Multiplier	INT
+	,Pub_Beer_Reminder		INT);
+
+
+
+INSERT INTO @Auxiliary_Table(
+	 Pub_ID_Helper 
+	,Box_Rank, Pub_ID
+	,Pub_Name, Pub_Beer_Sold
+	,Pub_Beer_Multiplier
+	,Pub_Beer_Reminder)
+
+
+SELECT
+	 Row_Number() OVER (ORDER BY a.ID)					 AS [Pub_ID_Helper]
+	,Row_Number() OVER (PARTITION BY a.ID ORDER BY a.ID) AS [Box_Rank]
+	,a.ID												 AS [Pub_ID]
+	,a.Pub_Name											 AS [Pub_Name]
+	,a.[Beer Sold]										 AS [Pub_Beer_Sold]
+	,a.[Beer Multiplier]								 AS [Pub_Beer_Multiplier]
+	,a.[Beer_Reminder]									 AS [Pub_Beer_Reminder]
+
+FROM 
+	(
+	SELECT 
+		 ID
+		,Pub_Name
+		,Beer_Sold										AS [Beer Sold]
+		,Beer_Sold/20+1									AS [Beer Multiplier]
+		,Beer_Sold%20									AS [Beer_Reminder]
+	FROM 
+		@Beer_Sale ) a
+
+
+
+	INNER JOIN 
+
+	(SELECT (a.number * 256) + b.number As number
+	FROM    (
+			SELECT number
+			FROM   master..spt_values
+			WHERE  type = 'P'
+			AND    number <= 255
+		   ) AS a
+	 CROSS JOIN 
+			(
+			SELECT number
+			FROM   master..spt_values
+			WHERE  type = 'P'
+			AND    number <= 255
+		   ) AS b) NumberTable
+
+	ON
+			NumberTable.number < [Beer Multiplier];
+
+
+---------------- Declaring and filling final table! ---------------- 
+
+DECLARE @Logistic_Report TABLE(
+	 Pub_ID_Helper			 INT PRIMARY KEY
+	,PUB_ID INT
+	,Box_Rank INT
+	,Pub_Name VARCHAR(30)
+	,Pub_Beer_Name VARCHAR(30) Default 'Plzen'
+	,Box_Name VARCHAR(30)
+	,Beer_in_Box INT);
+
+INSERT INTO @Logistic_Report (
+	 Pub_ID_Helper
+	,PUB_ID
+	,Box_Rank
+	,Pub_Name
+	,Box_Name
+	,Beer_in_Box)
+
+SELECT
+	 Pub_ID_Helper
+	,[Pub_ID]
+	,[Box_Rank]
+	,[Pub_Name]
+	,B.Box_Stock_Name
+		   ,CASE
+			  WHEN [Box_Rank] = 1 THEN [Pub_Beer_Reminder] -- The first row in partition will contain [Pub_Beer_Reminderr
+			  ELSE '20'									   -- All the other rows will hold "full" box of 20
+		    END AS [Beer in Box] 
+
+FROM
+	@Auxiliary_Table A
+
+JOIN @Box_Stock B ON B.ID=A.Pub_ID_Helper;
+
+-------------------------- And the final SELECT: ------------------------------------------------
+
+SELECT 
+	 Pub_ID												AS [Pub ID]
+	,Pub_Name											AS [Pub Name]
+	,Pub_Beer_Name										AS [Pub Beer Name]
+	,Box_Name											AS [Box Name]
+	,Beer_in_Box										AS [Beer in Box]
+
+FROM 
+	@Logistic_Report;
+
+
+
+
+
+
+--------------------------------------------------------------------------------------------------------
+--------------------------  SECOND SOLUTION: -----------------------------------------------------------
+--------------------------------------------------------------------------------------------------------
+
+
+
+
+------------------------- Declaring input tables and inserting data: ------------------------- 
+
+
+
+---------------- Start ---------------- 
+
+
+DECLARE @Beer_Sale TABLE(
+	 ID							 INT PRIMARY KEY
+	,Pub_Name					 VARCHAR(30)
+	,Beer_Sold					 INT);
+
+INSERT INTO @Beer_Sale VALUES
+	 (1, 'U Zvířátka', 37)
+	,(2, 'U Hovada', 15)
+	,(3, 'U Divé Svině', 43);
+
+
+DECLARE @Box_Stock TABLE(
+     ID							 INT PRIMARY KEY
+	,Box_Stock_Name				 VARCHAR(30)
+	,Capacity					 INT);
+
+
+INSERT INTO @Box_Stock VALUES
+	 (1,'P-001',20)
+	,(2,'P-002',20)
+	,(3,'P-003',20)
+	,(4,'P-004',20)
+	,(5,'P-005',20)
+	,(6,'P-006',20)
+	,(7,'P-007',20)
+	,(8,'P-008',20)
+	,(9,'P-009',20)
+	,(10,'P-010',20); 
+
+---------------- End ---------------- 
+
+
+---------------- Preparing The Result Table: ---------------
+
+DECLARE @Logistic_Report TABLE(
+	 Pub_ID_Helper				INT PRIMARY KEY
+	,PUB_ID						INT
+	,Pub_Name					VARCHAR(30)
+	,Pub_Beer_Name				VARCHAR(30) Default 'Plzen'
+	,Box_Name					VARCHAR(30)
+	,Beer_in_Box				INT);
+
+---------------- Recursive CTEs for data preparation: ---------------
+
+
+WITH AUX_Logistic_Report_1 ( -- CTE that recursively computes "beer in boxes" and "reminder":
+	 PUB_ID, Pub_Name 
+	,Box_Volume 
+	,Beer_Sold)
+AS
+(
+	SELECT 
+		 ID
+		,Pub_Name
+		,Beer_Sold%20 
+		,Beer_Sold
+	FROM 
+		@Beer_Sale
+
+	UNION ALL
+
+	SELECT 
+		 PUB_ID 
+		,Pub_Name 
+		,20					-- When the 'Beer_Sold' value is bigger that 20, select 20, else select whatever remained 
+		,Beer_Sold - 20s 
+	FROM 
+		AUX_Logistic_Report_1
+	WHERE 
+		Beer_Sold > 20
+),
+
+AUX_Logistic_Report_2 ( -- The problem with AUX_Logistic_Report_1 CTE is that I miss nice INT column for joining @Box_Stock table
+	  Pub_ID_Helper     -- Thus I made this AUX_Logistic_Report_2 which will contain [Pub_ID_Helper] 
+	 ,PUB_ID 
+	 ,Pub_Name 
+	 ,Box_Volume)
+AS
+(
+	 SELECT 
+		 ROW_NUMBER() OVER (ORDER BY PUB_ID) AS [Pub_ID_Helper] -- This is the column that will enable me to join @Box_Stock table
+		,PUB_ID, Pub_Name
+		,Box_Volume
+	FROM 
+		AUX_Logistic_Report_1 
+)
+
+---------------- Filling final table! ---------------- 
+
+INSERT INTO @Logistic_Report (  
+	 Pub_ID_Helper
+	,PUB_ID, Pub_Name
+	,Box_Name
+	,Beer_in_Box) 
+
+	SELECT 
+		 LR2.Pub_ID_Helper
+		,LR2.PUB_ID
+		,LR2.Pub_Name
+		,BS.Box_Stock_Name
+		,LR2.Box_Volume
+
+	FROM 
+		AUX_Logistic_Report_2 LR2
+
+	JOIN @Box_Stock BS on BS.ID=LR2.Pub_ID_Helper;
+
+-------------------------- And the final SELECT: ------------------------------------------------
+
+SELECT								
+	 Pub_ID			AS [Pub ID]
+	,Pub_Name		AS [Pub Name]
+	,Pub_Beer_Name	AS [Pub Beer Name]
+	,Box_Name		AS [Box Name]
+	,Beer_in_Box	AS [Beer in Box]
+
+FROM @Logistic_Report
+
+
+
+-------------------------------------------------------------------------------------------------------
+-----------------------------The White Space Problem---------------------------------------------------
+-------------------------------------------------------------------------------------------------------
+
+
+
+--
+--
+--		This seemingly harmless query has tricky line 85:
+--		SQL Server operates with ASCII characters, which knows two "white spaces": 32, usual White Space	
+--		and 160, No-Break Space, which looks the same to user, but Convert understand only 32 and once finds 160 in strings, 
+--		it is not able to convert Varchar into Datetime any more.
+--		Solution is to use Replace() to make sure that there is no 160 char in table
+--		
+
+select
+	zup.[VS žaloby],
+	zup.[Jméno],
+	a.first_name,
+	zup.[Pøíjmení (Název firmy)],
+	a.last_name,
+	s.name nazev_subjektu, 
+	a.city,
+	zup.[Obec], 
+	a.street, 
+
+	case when zup.[Ulice] is null or zup.[Ulice] = '' then
+	  case when zup.[Èást obce] is null or zup.[Èást obce] = '' then
+		isnull(zup.Obec,'')
+	  else zup.[Èást obce] end
+	else zup.[Ulice] end 
+
+	+ ' ' + 
+
+	case when zup.[È# p#] is null or zup.[È# p#] = '' then
+		isnull(zup.[È# o#],'')
+	else zup.[È# p#] + case when zup.[È# o#] is null or zup.[È# o#] = '' then '' else '/' + zup.[È# o#] end end
+
+	[Upom_ulice_èp]
+	,
+		
+	a.postal_code,
+	zup.[PSÈ],
+	s1.name+'; '+s2.name stav
+	
+	,
+
+	format(zup.[Datum narození pro žalobu],'dd.MM.yyyy') [Datum narození pro žalobu],
+	cv.value datnar
+
+from
+	[MulticashStatements].[dbo].[AK31_zaloby_cd1] zup 
+	join cause_balance cb on cb.variable_number = zup.[VS žaloby] collate Czech_CS_AI 
+	join cause c on c.cause_id = cb.cause_id and c.cause_status_id <> 101 --and c.inserted < '2017-06-09'
+	join cause_status s1 on s1.cause_status_id = c.cause_status_id 
+	join cause_status s2 on s1.parent_status_id = s2.cause_status_id 
+	join subject s on s.subject_id = c.subject_id 
+	join subject_address sa on sa.subject_id = s.subject_id and sa.type_id = 1710 
+	join address a on a.address_id = sa.address_id
+	left join cause_value cv on cv.cause_id = c.cause_id and cv.template_field_id = 218
+where
+	c.cause_id is not null
+	and 
+	(
+		(
+			(case when zup.Jméno is null then zup.[Pøíjmení (Název firmy)] else (zup.[Pøíjmení (Název firmy)] + ' ' + zup.[Jméno]) end) collate Czech_CS_AI != (a.company_name)
+			and
+			(case when zup.Jméno is null then zup.[Pøíjmení (Název firmy)] else (zup.[Pøíjmení (Název firmy)] + ' ' + zup.[Jméno]) end) collate Czech_CS_AI != (case when a.first_name is null then a.last_name else a.first_name + ' ' + a.last_name end)
+			and
+			(case when zup.Jméno is null then zup.[Pøíjmení (Název firmy)] else (zup.[Pøíjmení (Název firmy)] + ' ' + zup.[Jméno]) end) collate Czech_CS_AI != (case when a.first_name is null then a.last_name else a.last_name + ' ' + a.first_name end)
+		)
+	--(zup.[Pøíjmení (Název firmy)] + ' ' + zup.[Jméno]) collate Czech_CS_AI != s.name
+	
+	or
+	 --and 
+	 (
+	case when zup.[Ulice] is null or zup.[Ulice] = '' then
+	  case when zup.[Èást obce] is null or zup.[Èást obce] = '' then
+		isnull(zup.Obec,'')
+	  else zup.[Èást obce] end
+	else zup.[Ulice] end 
+
+	+ ' ' + 
+
+	case when zup.[È# p#] is null or zup.[È# p#] = '' then
+		isnull(zup.[È# o#],'')
+	else zup.[È# p#] + case when zup.[È# o#] is null or zup.[È# o#] = '' then '' else '/' + zup.[È# o#] end end) collate Czech_CS_AI  != a.street
+
+	or zup.[PSÈ] collate Czech_CS_AI != a.postal_code
+
+	or zup.[Datum narození pro žalobu] != convert(datetime,REPLACE(cv.value, ASCII(32), ASCII(160)),104)
+	)
